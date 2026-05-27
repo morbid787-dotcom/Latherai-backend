@@ -281,32 +281,42 @@ app.post('/api/identify-product', auth, async (req, res) => {
   if (!consumeScan(deviceId)) return res.status(429).json({ error: 'limit_exceeded', limit: FREE_SCANS });
 
   const profileText = buildProfileText(profile);
-  const prompt = `You are an expert cosmetic chemist with deep knowledge of skincare products. Look at the FRONT of this product packaging and identify the product.${profileText ? `\n${profileText}` : ''}
+  const prompt = `You are an expert cosmetic chemist. Look at the FRONT of this skincare/beauty product packaging, identify it, and analyze its formula from your knowledge.${profileText ? `\n${profileText}` : ''}
 
 Return ONLY valid JSON — no explanation, no markdown, just the JSON object:
 {
-  "cannotRead": <true if you cannot clearly identify any product from this image>,
+  "cannotRead": <true ONLY if you cannot identify any product at all from this image>,
   "brand": <brand name>,
-  "name": <product name>,
+  "name": <full product name>,
   "category": <"cleanser" | "serum" | "moisturizer" | "sunscreen" | "toner" | "mask" | "eye_cream" | "treatment" | "other">,
   "confidence": <"high" | "medium" | "low">,
-  "knownFormulation": <true if you know this product's exact ingredient list well enough to grade it>,
-  "score": <integer 0-100, only if knownFormulation is true, else omit>,
-  "grade": <"A"|"B+"|"B"|"C+"|"C"|"D"|"F", only if knownFormulation is true, else omit>,
-  "tone": <"good" if score>=74, "mid" if score>=58, else "bad" — only if knownFormulation is true, else omit>,
-  "verdict": <short punchy phrase max 6 words, only if knownFormulation is true, else omit>,
-  "summary": <2-3 honest sentences about the formula, only if knownFormulation is true, else omit>,
-  "personalNote": <1-2 sentences for this user's skin profile, or null>,
-  "ingredients": <array of top 12 ingredients with name/tone/note/flagged/flagReason — only if knownFormulation is true, else omit>
+  "fromKnowledge": true,
+  "score": <integer 0-100>,
+  "grade": <"A" | "B+" | "B" | "C+" | "C" | "D" | "F">,
+  "tone": <"good" if score>=74, "mid" if score>=58, else "bad">,
+  "verdict": <short punchy phrase max 6 words>,
+  "summary": <2-3 honest sentences about the formula. Be specific — mention key ingredients by name.>,
+  "personalNote": <1-2 sentences tailored to this user's skin profile, or null if no profile>,
+  "ingredients": [
+    {
+      "name": <ingredient name>,
+      "tone": <"good" | "ok" | "mid" | "watch">,
+      "note": <one clear sentence: what it is and what it does>,
+      "flagged": <true if problematic for this user's profile>,
+      "flagReason": <why flagged for this user, or null>
+    }
+  ]
 }
 
-Ingredient tone rules:
-- "watch" = fragrance/parfum, harsh alcohols, SLS, parabens, methylisothiazolinone, essential oils in face products
-- "good" = ceramides, hyaluronic acid, niacinamide, squalane, peptides, retinol, vitamin C
-- "ok" = safe fillers, mild surfactants, gentle preservatives
-- "mid" = weak actives, overhyped marketing ingredients
+If you can identify the product (even at medium confidence), always provide a full analysis using your knowledge of its formulation. List up to 12 key ingredients. The user sees a disclaimer that results are based on known formulation.
 
-Only set knownFormulation to true for products whose formulation you are highly confident about (major brands, widely documented products). If unsure, set it to false — the user will scan the back instead.`;
+Only set cannotRead to true if you genuinely cannot identify any product in the image at all.
+
+Ingredient tone rules:
+- "watch" = fragrance/parfum, harsh alcohols (SD Alcohol, Alcohol Denat), SLS, parabens, methylisothiazolinone, essential oils in face products
+- "good" = ceramides, hyaluronic acid, niacinamide, squalane, peptides, retinol, vitamin C (ascorbic acid)
+- "ok" = safe but unremarkable fillers, mild surfactants, gentle preservatives
+- "mid" = weak actives, overhyped marketing ingredients`;
 
   try {
     const text = await callAnthropic([
