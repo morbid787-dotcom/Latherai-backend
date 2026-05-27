@@ -274,6 +274,56 @@ Rules:
   }
 });
 
+// ---------- POST /api/identify-product ----------
+app.post('/api/identify-product', auth, async (req, res) => {
+  const { base64Image, profile, deviceId } = req.body;
+  if (!base64Image || !deviceId) return res.status(400).json({ error: 'missing_fields' });
+  if (!consumeScan(deviceId)) return res.status(429).json({ error: 'limit_exceeded', limit: FREE_SCANS });
+
+  const profileText = buildProfileText(profile);
+  const prompt = `You are an expert cosmetic chemist with deep knowledge of skincare products. Look at the FRONT of this product packaging and identify the product.${profileText ? `\n${profileText}` : ''}
+
+Return ONLY valid JSON — no explanation, no markdown, just the JSON object:
+{
+  "cannotRead": <true if you cannot clearly identify any product from this image>,
+  "brand": <brand name>,
+  "name": <product name>,
+  "category": <"cleanser" | "serum" | "moisturizer" | "sunscreen" | "toner" | "mask" | "eye_cream" | "treatment" | "other">,
+  "confidence": <"high" | "medium" | "low">,
+  "knownFormulation": <true if you know this product's exact ingredient list well enough to grade it>,
+  "score": <integer 0-100, only if knownFormulation is true, else omit>,
+  "grade": <"A"|"B+"|"B"|"C+"|"C"|"D"|"F", only if knownFormulation is true, else omit>,
+  "tone": <"good" if score>=74, "mid" if score>=58, else "bad" — only if knownFormulation is true, else omit>,
+  "verdict": <short punchy phrase max 6 words, only if knownFormulation is true, else omit>,
+  "summary": <2-3 honest sentences about the formula, only if knownFormulation is true, else omit>,
+  "personalNote": <1-2 sentences for this user's skin profile, or null>,
+  "ingredients": <array of top 12 ingredients with name/tone/note/flagged/flagReason — only if knownFormulation is true, else omit>
+}
+
+Ingredient tone rules:
+- "watch" = fragrance/parfum, harsh alcohols, SLS, parabens, methylisothiazolinone, essential oils in face products
+- "good" = ceramides, hyaluronic acid, niacinamide, squalane, peptides, retinol, vitamin C
+- "ok" = safe fillers, mild surfactants, gentle preservatives
+- "mid" = weak actives, overhyped marketing ingredients
+
+Only set knownFormulation to true for products whose formulation you are highly confident about (major brands, widely documented products). If unsure, set it to false — the user will scan the back instead.`;
+
+  try {
+    const text = await callAnthropic([
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Image } },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ]);
+    res.json(extractJson(text));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- GET /api/scan/status ----------
 app.get('/api/scan/status', auth, (req, res) => {
   const { deviceId } = req.query;
