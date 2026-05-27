@@ -274,6 +274,52 @@ Rules:
   }
 });
 
+// ---------- POST /api/analyze-by-name ----------
+app.post('/api/analyze-by-name', auth, async (req, res) => {
+  const { brand, name, profile, deviceId } = req.body;
+  if (!brand || !name || !deviceId) return res.status(400).json({ error: 'missing_fields' });
+  if (!consumeScan(deviceId)) return res.status(429).json({ error: 'limit_exceeded', limit: FREE_SCANS });
+
+  const profileText = buildProfileText(profile);
+  const prompt = `You are an expert cosmetic chemist. Analyze the skincare product "${brand} ${name}" using your knowledge of its formulation.${profileText ? `\n${profileText}` : ''}
+
+Return ONLY valid JSON — no explanation, no markdown, just the JSON object:
+{
+  "brand": "${brand}",
+  "name": "${name}",
+  "category": <"cleanser" | "serum" | "moisturizer" | "sunscreen" | "toner" | "mask" | "eye_cream" | "treatment" | "other">,
+  "fromKnowledge": true,
+  "score": <integer 0-100>,
+  "grade": <"A" | "B+" | "B" | "C+" | "C" | "D" | "F">,
+  "tone": <"good" if score>=74, "mid" if score>=58, else "bad">,
+  "verdict": <short punchy phrase max 6 words>,
+  "summary": <2-3 honest sentences about the formula. Be specific — mention key ingredients by name.>,
+  "personalNote": <1-2 sentences tailored to this user's skin profile, or null if no profile>,
+  "ingredients": [
+    {
+      "name": <ingredient name>,
+      "tone": <"good" | "ok" | "mid" | "watch">,
+      "note": <one clear sentence: what it is and what it does>,
+      "flagged": <true if problematic for this user's profile>,
+      "flagReason": <why flagged, or null>
+    }
+  ]
+}
+
+List up to 12 key ingredients. Ingredient tone rules:
+- "watch" = fragrance/parfum, harsh alcohols, SLS, parabens, methylisothiazolinone, essential oils in face products
+- "good" = ceramides, hyaluronic acid, niacinamide, squalane, peptides, retinol, vitamin C
+- "ok" = safe fillers, mild surfactants, gentle preservatives
+- "mid" = weak actives, overhyped marketing ingredients`;
+
+  try {
+    const text = await callAnthropic([{ role: 'user', content: prompt }]);
+    res.json(extractJson(text));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- POST /api/identify-product ----------
 app.post('/api/identify-product', auth, async (req, res) => {
   const { base64Image, profile, deviceId } = req.body;
